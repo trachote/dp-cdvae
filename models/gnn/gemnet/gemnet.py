@@ -124,6 +124,8 @@ class GemNetT(torch.nn.Module):
         output_init: str = "HeOrthogonal",
         activation: str = "swish",
         scale_file: Optional[str] = None,
+        condition_time: str = None,
+        time_dim: int = 0,
     ):
         super().__init__()
         self.num_targets = num_targets
@@ -192,7 +194,7 @@ class GemNetT(torch.nn.Module):
 
         # Embedding block
         self.atom_emb = AtomEmbedding(emb_size_atom)
-        self.atom_latent_emb = nn.Linear(emb_size_atom + latent_dim, emb_size_atom)
+        self.atom_latent_emb = nn.Linear(emb_size_atom + latent_dim + time_dim, emb_size_atom)
         self.edge_emb = EdgeEmbedding(
             emb_size_atom, num_radial, emb_size_edge, activation=activation
         )
@@ -537,14 +539,14 @@ class GemNetT(torch.nn.Module):
         rbf = self.radial_basis(D_st)
 
         # Embedding block
-        h = self.atom_emb(atomic_numbers)
+        h = self.atom_emb(atomic_numbers)        
         # Merge z, time embedding, and atom embedding
         if (z is not None) or (time_emb is not None):
             h_per_atom = []
             if z is not None:
                 h_per_atom.append(z.repeat_interleave(num_atoms, dim=0))
             if time_emb is not None:
-                h_per_atom.append(time_emb.repeat_interleave(num_atoms, dim=0))
+                h_per_atom.append(time_emb)
             h = torch.cat([h, *h_per_atom], dim=1)
             h = self.atom_latent_emb(h)
             

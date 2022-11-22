@@ -48,8 +48,8 @@ class CDVAE(MODEL):
         
         self.prop_model = prop_model
 
-        self.sigmas = noise_model.sigmas
-        self.type_sigmas = noise_model.type_sigmas
+        #self.sigmas = noise_model.sigmas
+        #self.type_sigmas = noise_model.type_sigmas
 
         self.embedding = torch.zeros(100, 92)
         for i in range(100):
@@ -57,8 +57,7 @@ class CDVAE(MODEL):
 
         # obtain from datamodule.
         self.lattice_scaler = None
-        self.scaler = None  
-        self.decode_stats.lattice_scaler = self.lattice_scaler
+        self.scaler = None
         
         
     def kld_reparam(self, hidden):
@@ -102,16 +101,21 @@ class CDVAE(MODEL):
         rand_atom_types = torch.multinomial(atom_type_probs, num_samples=1).squeeze(1) + 1
         return rand_atom_types, used_type_sigmas_per_atom
 
-    def get_noisy_feats(self, batch, lengths, angles, composition_per_atom):
-        cart_coords = frac_to_cart_coords(batch.frac_coords, lengths, 
-                                          angles, batch.num_atoms)
+    def get_noisy_feats(self, batch, pred_lengths, pred_angles, composition_per_atom):
+        cart_coords = frac_to_cart_coords(batch.frac_coords, pred_lengths, 
+                                          pred_angles, batch.num_atoms)
         composition_probs = F.softmax(composition_per_atom.detach(), dim=-1)
         
         noisy_cart_coords, rand_atom_types = self.noise_model.perturb_sample(cart_coords, 
                                                                              batch.atom_types, 
                                                                              composition_probs, 
                                                                              batch.num_atoms)
-        noisy_frac_coords = cart_to_frac_coords(noisy_cart_coords, lengths, angles, batch.num_atoms)
+        noisy_frac_coords = cart_to_frac_coords(noisy_cart_coords, pred_lengths, 
+                                                pred_angles, batch.num_atoms)
+        
+        # Recalculate noisy_cart_coords in order to project atoms back into GROUND-TRUTH cell.
+        noisy_cart_coords = frac_to_cart_coords(noisy_frac_coords, batch.lengths, 
+                                                batch.angles, batch.num_atoms)
         return noisy_frac_coords, noisy_cart_coords, rand_atom_types
     
     @torch.no_grad()
@@ -187,7 +191,7 @@ class CDVAE(MODEL):
                 noise_cart = torch.randn_like(
                     cur_frac_coords) * torch.sqrt(step_size * 2)
                 pred_cart_coord_diff, pred_atom_types = self.decoder(
-                    z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles)
+                    z, cur_frac_coords, cur_atom_types, num_atoms, lengths, angles, time_emb=None)
                 cur_cart_coords = frac_to_cart_coords(
                     cur_frac_coords, lengths, angles, num_atoms)
 
@@ -251,14 +255,14 @@ class CDVAE(MODEL):
                                                                                      pred_lengths, 
                                                                                      pred_angles, 
                                                                                      pred_composition_per_atom)
-        used_sigmas_per_atom = self.noise_model.sigma
-        used_type_sigmas_per_atom = self.noise_model.type_sigma
+        used_sigmas_per_atom = self.noise_model.sigma_t
+        used_type_sigmas_per_atom = self.noise_model.type_sigma_t
     
         # Get scores
-        time_emb = None
-        pred_cart_coord_diff, pred_atom_types = self.decoder(z, noisy_frac_coords, 
+        time_emb = self.noise_model.t
+        pred_cart_coord_diff, pred_atom_types = self.decoder(z, time_emb, noisy_frac_coords, 
                                                              rand_atom_types, batch.num_atoms, 
-                                                             pred_lengths, pred_angles, time_emb)
+                                                             pred_lengths, pred_angles)
 
         # Compute losses
         ## Score losses
@@ -426,7 +430,6 @@ class CDVAE(MODEL):
             used_sigmas_per_atom[:, None]**2
         pred_cart_coord_diff = pred_cart_coord_diff / \
             used_sigmas_per_atom[:, None]
-
         loss_per_atom = torch.sum(
             (target_cart_coord_diff - pred_cart_coord_diff)**2, dim=1)
 

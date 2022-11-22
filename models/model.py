@@ -23,6 +23,7 @@ class MODEL(torch.nn.Module):
         self.cfg = cfg
         self.hparams = cfg.model
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        #self.device = "cpu"
         self.hparams.data = cfg.data
         self.current_epoch = 0
         self.logs = {'train':[], 'val':[], 'test':[]}

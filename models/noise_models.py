@@ -2,24 +2,27 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
+import math
+from torch_scatter import scatter_mean
 
 import models.edm_utils as utils
 from models.gnn.embeddings import MAX_ATOMIC_NUM
 
-class CDVAESDE:
-    def __init__(self, hparams):        
+class CDVAESDE(nn.Module):
+    def __init__(self, sigma_begin, sigma_end, type_sigma_begin, type_sigma_end, num_noise_level):  
+        super().__init__()
         sigmas = torch.tensor(np.exp(np.linspace(
-            np.log(hparams.sigma_begin),
-            np.log(hparams.sigma_end),
-            hparams.num_noise_level)), dtype=torch.float32)
+            np.log(sigma_begin),
+            np.log(sigma_end),
+            num_noise_level)), dtype=torch.float32)
         self.sigmas = nn.Parameter(sigmas, requires_grad=False)
         
         type_sigmas = torch.tensor(np.exp(np.linspace(
-            np.log(hparams.type_sigma_begin),
-            np.log(hparams.type_sigma_end),
-            hparams.num_noise_level)), dtype=torch.float32)
+            np.log(type_sigma_begin),
+            np.log(type_sigma_end),
+            num_noise_level)), dtype=torch.float32)
         self.type_sigmas = nn.Parameter(type_sigmas, requires_grad=False)
-        
+                
     def perturb_sample(self, x, h, composition_probs, num_atoms):
         # Get noise level randomly -> equivalent to get time step randomly in DDPM
         noise_level = torch.randint(0, self.sigmas.size(0),
@@ -32,7 +35,10 @@ class CDVAESDE:
         # Get fixed sigmas by noise level
         used_sigmas_per_atom = self.sigmas[noise_level].repeat_interleave(num_atoms, dim=0)       
         used_type_sigmas_per_atom = self.type_sigmas[type_noise_level].repeat_interleave(num_atoms, dim=0)
-        self.sigma, self.type_sigma = used_sigmas_per_atom, used_type_sigmas_per_atom
+        
+        self.t = None
+        self.sigma_t  = used_sigmas_per_atom
+        self.type_sigma_t = used_type_sigmas_per_atom
         
         # Add noise to coords
         x_noises = torch.randn_like(x) * used_sigmas_per_atom[:, None]
@@ -42,8 +48,10 @@ class CDVAESDE:
         atom_type_probs = F.one_hot(h - 1, num_classes=MAX_ATOMIC_NUM) +\
                           composition_probs * used_type_sigmas_per_atom[:, None]
         rand_atom_types = torch.multinomial(atom_type_probs, num_samples=1).squeeze(1) + 1
-        
         return noisy_x, rand_atom_types
+    
+    def forward(self):
+        return NotImplementedError
 
 
 # Defining some useful util functions.
@@ -110,8 +118,39 @@ def cosine_beta_schedule(timesteps, s=0.008, raise_to_power: float = 1):
 
     return alphas_cumprod
 
+class PositiveLinear(nn.Module):
+    """Linear layer with weights forced to be positive."""
 
-class PredefinedNoiseSchedule(torch.nn.Module):
+    def __init__(self, in_features: int, out_features: int, bias: bool = True,
+                 weight_init_offset: int = -2):
+        super(PositiveLinear, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.weight = torch.nn.Parameter(
+            torch.empty((out_features, in_features)))
+        if bias:
+            self.bias = torch.nn.Parameter(torch.empty(out_features))
+        else:
+            self.register_parameter('bias', None)
+        self.weight_init_offset = weight_init_offset
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        torch.nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+
+        with torch.no_grad():
+            self.weight.add_(self.weight_init_offset)
+
+        if self.bias is not None:
+            fan_in, _ = torch.nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in) if fan_in > 0 else 0
+            torch.nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, input):
+        positive_weight = softplus(self.weight)
+        return F.linear(input, positive_weight, self.bias)
+
+class PredefinedNoiseSchedule(nn.Module):
     """
     Predefined noise schedule. Essentially creates a lookup array for predefined (non-learned) noise schedules.
     """
@@ -129,7 +168,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
         else:
             raise ValueError(noise_schedule)
 
-        print('alphas2', alphas2)
+        #print('alphas2', alphas2)
 
         sigmas2 = 1 - alphas2
 
@@ -138,7 +177,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
 
         log_alphas2_to_sigmas2 = log_alphas2 - log_sigmas2
 
-        print('gamma', -log_alphas2_to_sigmas2)
+        #print('gamma', -log_alphas2_to_sigmas2)
 
         self.gamma = torch.nn.Parameter(
             torch.from_numpy(-log_alphas2_to_sigmas2).float(),
@@ -149,7 +188,7 @@ class PredefinedNoiseSchedule(torch.nn.Module):
         return self.gamma[t_int]
 
 
-class GammaNetwork(torch.nn.Module):
+class GammaNetwork(nn.Module):
     """The gamma network models a monotonic increasing function. Construction as in the VDM paper."""
     def __init__(self):
         super().__init__()
@@ -189,8 +228,17 @@ class GammaNetwork(torch.nn.Module):
         return gamma
     
     
-class EDMSDE:
-    def __init__(self, hparams):
+class EDMSDE(nn.Module):
+    """
+    https://github.com/ehoogeboom/e3_diffusion_for_molecules
+    """
+    def __init__(self, in_node_nf, n_dims, timesteps, noise_precision, context, t0_always, noise_schedule):
+        super().__init__()
+        self.in_node_nf = in_node_nf
+        self.n_dims = n_dims
+        self.T = timesteps
+        self.t0_always = t0_always
+        
         if noise_schedule == 'learned':
             self.gamma = GammaNetwork()
         else:
@@ -213,6 +261,20 @@ class EDMSDE:
         """Computes alpha given gamma."""
         return self.inflate_batch_array(torch.sqrt(torch.sigmoid(-gamma)), target_tensor)    
 
+    def get_node_mask(self, num_atoms):
+        # Not sure if this is correct for EDM's node_mask.
+        node_mask = torch.arange(len(num_atoms), device=num_atoms.device)
+        return node_mask.repeat_interleave(num_atoms).unsqueeze(-1)
+        
+    def sample_gaussian(self, size, device, num_atoms=None, remove_mean=False):
+        x = torch.randn(size, device=device)
+        if remove_mean:
+            node_mask = self.get_node_mask(num_atoms)
+            mean = scatter_mean(x, node_mask, dim=0)
+            x = x - mean.repeat_interleave(num_atoms, dim=0)
+        return x
+    
+    '''
     def sample_combined_position_feature_noise(self, n_samples, n_nodes, node_mask):
         """
         Samples mean-centered normal noise for z_x, and standard normal noise for z_h.
@@ -225,10 +287,23 @@ class EDMSDE:
             node_mask=node_mask)
         z = torch.cat([z_x, z_h], dim=2)
         return z
+    '''
+    def sample_combined_position_feature_noise(self, num_nodes, num_atoms):
+        """
+        Samples mean-centered normal noise for z_x, and standard normal noise for z_h.
+        """
+        z_x = self.sample_gaussian(size=(num_nodes, self.n_dims), 
+                                    device=num_atoms.device,
+                                    num_atoms=num_atoms,
+                                    remove_mean=True)
+        z_h = self.sample_gaussian(size=(num_nodes, self.in_node_nf), 
+                                   device=num_atoms.device)
+        z = torch.cat([z_x, z_h], dim=-1)
+        return z
     
-    def perturb_sample(self, x, h):
+    def perturb_sample(self, x, h, compostion_probs, num_atoms):        
          # This part is about whether to include loss term 0 always.
-        if t0_always:
+        if self.t0_always:
             # loss_term_0 will be computed separately.
             # estimator = loss_0 + loss_t,  where t ~ U({1, ..., T})
             lowest_t = 1
@@ -254,18 +329,29 @@ class EDMSDE:
         # Compute alpha_t and sigma_t from gamma.
         alpha_t = self.alpha(gamma_t, x)
         sigma_t = self.sigma(gamma_t, x)
-        self.sigma, self.t = sigma_t, t
+        
+        self.t = t
+        self.sigma_t = sigma_t.squeeze()
+        self.type_sigma_t = self.sigma_t.clone()
 
         # Sample zt ~ Normal(alpha_t x, sigma_t)
-        eps = self.sample_combined_position_feature_noise(
-            n_samples=x.size(0), n_nodes=x.size(1), node_mask=node_mask)
+        #eps = self.sample_combined_position_feature_noise(
+            #n_nodes=x.size(0), n_nodes=x.size(1), node_mask=node_mask)
+        eps = self.sample_combined_position_feature_noise(x.size(0), num_atoms)
 
         # Concatenate x, h[integer] and h[categorical].
-        xh = torch.cat([x, h['categorical'], h['integer']], dim=2)
+        h = F.one_hot(h - 1, num_classes=MAX_ATOMIC_NUM)
+        #xh = torch.cat([x, h['categorical'], h['integer']], dim=2)
+        xh = torch.cat([x, h], dim=-1)
+        
         # Sample z_t given x, h for timestep t, from q(z_t | x, h)
         z_t = alpha_t * xh + sigma_t * eps
-        x_t, h_t = z_t[:,:,:x.size(0)], z_t[:,:,x.size(0):]
-        return z_t
+        x_t, h_t = z_t[:,:x.size(1)], z_t[:,x.size(1):]
+        h_t = h_t.max(dim=-1)[1]+1
+        return x_t, h_t
+    
+    def forward(self):
+        return NotImplementedError
 
     
 def get_noise_fn(sde, x, h, reduce_mean=True, get_loss=False, likelihood_weighting=True, eps=1e-5):
