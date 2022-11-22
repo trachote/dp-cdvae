@@ -1,6 +1,6 @@
 expname: mp_20_class
 
-PROJECT_ROOT: /home/chics/Users/chote_test/cdvae-cue/cdvae_mod_v2.0.3
+PROJECT_ROOT: /home/chics/Users/chote_test/cdvae-cue/cond-cdvaepp
 #PROJECT_ROOT: /home/cue/projects/cdvae-3
 
 # metadata specialised for each experiment
@@ -102,12 +102,20 @@ decode_stats:
     teacher_forcing_lattice: True
     
 noise_model:
-    _target_: CDVAESDE
-    sigma_begin: 10.
-    sigma_end: 0.01
-    type_sigma_begin: 5.
-    type_sigma_end: 0.01
-    num_noise_level: 50
+#     _target_: CDVAESDE
+#     sigma_begin: 10.
+#     sigma_end: 0.01
+#     type_sigma_begin: 5.
+#     type_sigma_end: 0.01
+#     num_noise_level: 50
+    _target_: EDMSDE
+    in_node_nf: 100
+    n_dims: 3
+    timesteps: 1000
+    noise_precision: 1e-5
+    context: False
+    t0_always: False
+    noise_schedule: learned
 
 decoder:
     _target_: GemNetT
@@ -116,6 +124,8 @@ decoder:
     max_neighbors: ${model.max_neighbors}
     radius: ${model.radius}
     scale_file: ${PROJECT_ROOT}/models/gnn/gemnet/gemnet-dT.json
+    condition_time: embed
+    time_dim: 128
 
 prop_model:
     _target_: None
