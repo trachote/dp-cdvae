@@ -34,6 +34,7 @@ class MODEL(torch.nn.Module):
         self.train_log = None
         self.val_log = None
         self.model_name = "model"
+        self.noise_model = None
 
     def init(self):
         self.init_datamodule()
@@ -147,14 +148,13 @@ class MODEL(torch.nn.Module):
         # ckpts = list(self.cfg.output_dir.glob(f'*={self.model_name}=*.ckpt'))
         ckpts = list(glob.glob(f'{self.cfg.output_dir}/*={self.model_name}=*.ckpt'))        
         if len(ckpts) > 0:
-            ckpt_epochs = np.array([int(ckpt.parts[-1].split('.')[0].split('=')[1]) for ckpt in ckpts])
+            ckpt_epochs = np.array([int(ckpt.split('/')[-1].split('.')[0].split('=')[1]) for ckpt in ckpts])
             ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
             print(f">>>>> Load model from checkpoint {ckpt}")
             ckpt = torch.load(ckpt)
 
-            
             self.current_epoch = ckpt['epoch'] + 1
-
+            
             self.load_state_dict(ckpt['model_state_dict'])
             self.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
@@ -168,7 +168,7 @@ class MODEL(torch.nn.Module):
 
             if len(ckpts) > 0:
 
-                ckpt_epochs = np.array([int(ckpt.parts[-1].split('.')[0].split('=')[1]) for ckpt in ckpts])
+                ckpt_epochs = np.array([int(ckpt.split('/')[-1].split('.')[0].split('=')[1]) for ckpt in ckpts])
                 ckpt = str(ckpts[ckpt_epochs.argsort()[-1]])
                 print(f">>>>> Load val model from checkpoint {ckpt}")
 

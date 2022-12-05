@@ -22,6 +22,8 @@ class CDVAESDE(nn.Module):
             np.log(type_sigma_end),
             num_noise_level)), dtype=torch.float32)
         self.type_sigmas = nn.Parameter(type_sigmas, requires_grad=False)
+
+        self.T = num_noise_level
                 
     def perturb_sample(self, x, h, composition_probs, num_atoms):
         # Get noise level randomly -> equivalent to get time step randomly in DDPM
@@ -49,6 +51,10 @@ class CDVAESDE(nn.Module):
                           composition_probs * used_type_sigmas_per_atom[:, None]
         rand_atom_types = torch.multinomial(atom_type_probs, num_samples=1).squeeze(1) + 1
         return noisy_x, rand_atom_types
+
+    def get_sample_noise(self, num_atoms, gt_atom_type):
+        noise_cart = torch.rand((num_atoms.sum(), 3), device=num_atoms.device)
+        return noise_cart, gt_atom_type
     
     def forward(self):
         return NotImplementedError
@@ -299,7 +305,7 @@ class EDMSDE(nn.Module):
         z_h = self.sample_gaussian(size=(num_nodes, self.in_node_nf), 
                                    device=num_atoms.device)
         z = torch.cat([z_x, z_h], dim=-1)
-        return z
+        return z, z_x, z_h
     
     def perturb_sample(self, x, h, compostion_probs, num_atoms):        
          # This part is about whether to include loss term 0 always.
@@ -333,11 +339,14 @@ class EDMSDE(nn.Module):
         self.t = t
         self.sigma_t = sigma_t.squeeze()
         self.type_sigma_t = self.sigma_t.clone()
+        self.gamma_t = gamma_t
 
         # Sample zt ~ Normal(alpha_t x, sigma_t)
         #eps = self.sample_combined_position_feature_noise(
             #n_nodes=x.size(0), n_nodes=x.size(1), node_mask=node_mask)
-        eps = self.sample_combined_position_feature_noise(x.size(0), num_atoms)
+        eps, eps_x, eps_h = self.sample_combined_position_feature_noise(x.size(0), num_atoms)
+        self.eps_x = eps_x
+        self.eps_h = eps_h
 
         # Concatenate x, h[integer] and h[categorical].
         h = F.one_hot(h - 1, num_classes=MAX_ATOMIC_NUM)
@@ -347,8 +356,21 @@ class EDMSDE(nn.Module):
         # Sample z_t given x, h for timestep t, from q(z_t | x, h)
         z_t = alpha_t * xh + sigma_t * eps
         x_t, h_t = z_t[:,:x.size(1)], z_t[:,x.size(1):]
-        h_t = h_t.max(dim=-1)[1]+1
+        #h_t = h_t.max(dim=-1)[1]+1
         return x_t, h_t
+
+    def get_sample_noise(self, num_atoms, gt_atom_type):
+        z_x = self.sample_gaussian(size=(num_atoms.sum(), self.n_dims),
+                                   device=num_atoms.device,
+                                   num_atoms=num_atoms,
+                                   remove_mean=True)
+
+        if gt_atom_type is None:
+            z_h = self.sample_gaussian(size=(num_atoms.sum(), self.in_node_nf),
+                                       device=num_atoms.device)
+        else:
+            z_h = gt_atom_type
+        return z_x, z_h
     
     def forward(self):
         return NotImplementedError
