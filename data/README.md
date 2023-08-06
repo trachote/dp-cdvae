@@ -1,4 +1,4 @@
-# Datasets for material generation
+# Benchmark datasets for material generation
 
 This directory contains 3 benchmark datasets for the problem of material generation, curated from the DFT calculations in cited papers:
 
