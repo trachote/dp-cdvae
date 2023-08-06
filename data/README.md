@@ -21,7 +21,7 @@ Please consider citing the following paper if you find these datasets useful.
 }
 ```
 
-In addition, please consider citing the original papers from which we curate these datasets.
+In addition, please consider citing the original papers from which [Xie et al., 2021] curates these datasets.
 
 Perov_5:
 
