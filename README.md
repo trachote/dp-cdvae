@@ -3,4 +3,4 @@ DP-CDVAE is a generative model for crystal structure generation developed on cry
 This is an implemented code of a paper: Diffusion probabilistic models enhance variational autoencoder for crystal structure
 generative modeling.
 
-[Paper](https://arxiv.org/abs/2308.02165).
+[[Paper](https://arxiv.org/abs/2308.02165)]
