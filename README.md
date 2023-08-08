@@ -22,7 +22,7 @@ compute reconstruction & generation metrics
 python compute_metrics.py --root_path out_dir --task recon gen
 ```
 
-# GNN
+# Graph Neural Networks
 DimeNet++ and GemNetT have been modified to compatible with crystal structures from [CDVAE](https://github.com/txie-93/cdvae) code.
 
 # References
