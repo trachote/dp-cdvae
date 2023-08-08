@@ -1,7 +1,7 @@
 # Diffusion Probabilistic CDVAE (DP-CDVAE)
 DP-CDVAE is a generative model for crystal structure generation developed on crystal diffusional variational autoencoder ([CDVAE](https://github.com/txie-93/cdvae)).
-This is an implemented code of a paper: Diffusion probabilistic models enhance variational autoencoder for crystal structure
-generative modeling.
+This is an implemented code from a paper titled "Diffusion probabilistic models enhance variational autoencoder for crystal structure
+generative modeling".
 
 Link to [[Paper](https://arxiv.org/abs/2308.02165)]
 
@@ -23,7 +23,7 @@ python compute_metrics.py --root_path out_dir --task recon gen
 ```
 
 # Graph Neural Networks
-DimeNet++ and GemNetT have been modified to compatible with crystal structures from [CDVAE](https://github.com/txie-93/cdvae) code.
+DimeNet++ and GemNetT have been adapted to be compatible with crystal structures by [Xie et al.](https://github.com/txie-93/cdvae).
 
 # References
 DP-CDVAE
