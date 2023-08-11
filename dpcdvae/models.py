@@ -24,7 +24,6 @@ from common.data_utils import (
 from gnn.embeddings import MAX_ATOMIC_NUM, KHOT_EMBEDDINGS
 #from dpcdvae.utils import gaussian_kld
 
-
 def build_mlp(in_dim, hidden_dim, fc_num_layers, out_dim):
     mods = [nn.Linear(in_dim, hidden_dim), nn.ReLU()]
     for i in range(fc_num_layers - 1):
