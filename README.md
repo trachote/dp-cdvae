@@ -22,6 +22,10 @@ compute reconstruction & generation metrics
 python compute_metrics.py --root_path out_dir --task recon gen
 ```
 
+An animation of a crystal structure and its atomic positions denoised from time step 1000 to 0.
+![example_str0_100steps_with_arrows](https://github.com/trachote/dp-cdvae/assets/68939218/cc00add3-38b1-4d3b-a464-4605aa3cb3db)
+
+
 # Graph Neural Networks
 DimeNet++ and GemNetT have been adapted to be compatible with crystal structures by [Xie et al.](https://github.com/txie-93/cdvae).
 
