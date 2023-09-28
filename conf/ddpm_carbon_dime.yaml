@@ -123,7 +123,7 @@ diffnet:
     latent_dim: ${model.latent_dim}
     max_neighbors: ${model.max_neighbors}
     radius: ${model.radius}
-    scale_file: ${PROJECT_ROOT}/models/gnn/gemnet/gemnet-dT.json
+    scale_file: ${PROJECT_ROOT}/gnn/gemnet/gemnet-dT.json
     condition_time: embed
     time_dim: 128
     noisy_atom_types: False
