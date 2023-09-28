@@ -1,6 +1,6 @@
 expname: carbon
 
-PROJECT_ROOT: /home/chics/Users/chote_test/cdvae-cue/dp-cdvae_v0.1
+PROJECT_ROOT: /path/to/folder
 
 # metadata specialised for each experiment
 core:
