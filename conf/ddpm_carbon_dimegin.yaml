@@ -1,0 +1,206 @@
+expname: carbon 
+
+PROJECT_ROOT: /path/to/folder/dp-cdvae
+
+# metadata specialised for each experiment
+core:
+  version: 0.0.1
+  tags:
+    - ${now:%Y-%m-%d}
+
+data: carbon 
+
+checkpoint_freq_every_n_epoch: 5
+
+logging:
+  # log frequency
+  val_check_interval: 5
+  progress_bar_refresh_rate: 20
+
+  # log every n epoch
+  log_freq_every_n_epoch: 1
+  check_val_every_n_epoch: 1
+
+  # lr_monitor:
+  #   logging_interval: "step"
+  #   log_momentum: False
+
+
+algo: cdvae
+
+sde:
+
+  model:
+    num_scales: 1000
+    beta_min: 0.1
+    beta_max: 20.
+    sigma_min: 0.01
+    sigma_max: 50
+    dropout: 0.1
+    embedding_type: fourier
+
+  training:
+    sde: vesde
+    likelihood_weighting: False
+    continuous: True
+    reduce_mean: False
+
+model:
+  _target_: CDVAEmix
+  hidden_dim: 256 
+  latent_dim: 256 
+  fc_num_layers: 1
+  max_atoms: ${data.max_atoms}
+  cost_natom: 1.
+  cost_coord: 1.
+  cost_type: 0.1 
+  cost_lattice: 100.
+  cost_composition: 1.
+  cost_edge: 10.
+  cost_vlb: 1.
+  cost_property: 0.1
+  cost_property_class: 1.
+  beta: 0.01
+  mul_cost_coord_epoch: 800
+  teacher_forcing_lattice: True
+  teacher_forcing_max_epoch: 200 #${data.teacher_forcing_max_epoch}
+  max_neighbors: 20  # maximum number of neighbors for OTF graph bulding in decoder
+  radius: 7.  # maximum search radius for OTF graph building in decoder
+  sigma_begin: 10.
+  sigma_end: 0.01
+  type_sigma_begin: 5.
+  type_sigma_end: 0.01
+  num_noise_level: 1000
+  predict_property: False
+  predict_property_class: False
+  weighted_kl: False
+  recenter: False
+  train_coord: frac
+  sigma: upper_bound
+  train_kld_eps: False
+
+encoder:
+    _target_: DimeGINEncoder
+    latent_dim: ${model.latent_dim}
+    
+    encoder1: 
+        _target_: DimeNet
+        num_targets: ${model.latent_dim}
+        hidden_channels: 128
+        num_blocks: 4
+        int_emb_size: 64
+        basis_emb_size: 8
+        out_emb_channels: 256
+        num_spherical: 7
+        num_radial: 6
+        otf_graph: ${data.otf_graph}
+        cutoff: 7.0
+        max_num_neighbors: 20
+        envelope_exponent: 5
+        num_before_skip: 1
+        num_after_skip: 2
+        num_output_layers: 3
+        readout: ${data.readout}
+        
+    encoder2: 
+        _target_: GINEncoder
+        latent_dim: ${model.latent_dim}
+        hidden_dim: 256
+
+decode_stats:
+    _target_: MLP
+    hidden_dim: ${model.hidden_dim}
+    latent_dim: ${model.latent_dim}
+    fc_num_layers: ${model.fc_num_layers}
+    max_atoms: ${model.max_atoms}
+    lattice_scale_method: ${data.lattice_scale_method}
+    teacher_forcing_lattice: ${model.teacher_forcing_lattice}
+    #teacher_forcing_max_epoch: ${data.teacher_forcing_max_epoch}
+    drop_rate: 0
+
+noise_model:
+     _target_: MixSDE
+     in_node_nf: 100
+     n_dims: 3
+     timesteps: ${model.num_noise_level}
+     #noise_precision: 1e-5
+     #context: False
+     t0_always: False 
+     noise_schedule: sigmoid
+     beta_start: 1e-10
+     beta_end: 0.01
+     type_sigma_begin: 0.01
+     type_sigma_end: 5.     
+
+decoder:
+    _target_: GemNetT
+    hidden_dim: 128
+    latent_dim: ${model.latent_dim}
+    max_neighbors: ${model.max_neighbors}
+    radius: ${model.radius}
+    scale_file: ${PROJECT_ROOT}/models/gnn/gemnet/gemnet-dT.json
+    condition_time: embed
+    time_dim: 128
+    noisy_atom_types: False
+    fourier_feats: True
+
+prop_model:
+    _target_: None
+
+optim:
+  optimizer:
+    #  Adam-oriented deep learning
+    _target_: Adam
+    #  These are all default parameters for the Adam optimizer
+    lr: 0.001
+    betas: [ 0.9, 0.999 ]
+    eps: 1e-08
+    weight_decay: 0
+
+  use_lr_scheduler: True
+  lr_scheduler:
+    _target_: ReduceLROnPlateau
+    factor: 0.6
+    patience: 30
+    min_lr: 1e-4
+
+
+train:
+  # reproducibility
+  deterministic: False
+  random_seed: 42
+
+  # training
+
+  pl_trainer:
+    fast_dev_run: False # Enable this for debug purposes
+    gpus: 1
+    precision: 32
+    # max_steps: 10000
+    max_epochs: ${data.train_max_epochs}
+    accumulate_grad_batches: 1 # optimizer.step ทุก batch
+    num_sanity_val_steps: 2
+    gradient_clip_val: 0.5
+    gradient_clip_algorithm: value
+    profiler: simple
+
+  monitor_metric: 'val_loss'
+  monitor_metric_mode: 'min'
+
+  early_stopping:
+    patience: ${data.early_stopping_patience} # 60
+    verbose: False
+
+  model_checkpoints:
+    save_top_k: 1
+    verbose: False
+
+
+# defaults:
+#   - data: mp_20
+#   - logging: default
+#   - model: vae
+#   - optim: default
+#   - train: default
+#    Decomment this parameter to get parallel job running
+  # - override hydra/launcher: joblib
